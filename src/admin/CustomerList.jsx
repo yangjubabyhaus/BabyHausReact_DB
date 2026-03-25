@@ -31,11 +31,30 @@ export default function CustomerList({ user, showToast, initialUrgency }) {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
+    const canSee = (c) => can(user.role, 'viewAll') || c.store === user.store
     const ch = supabase.channel(`custlist-${user.id}`)
-      .on('postgres_changes', { event:'*', schema:'public', table:'customers' }, load)
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:'customers' }, (payload) => {
+        const c = payload.new
+        if (!c || c.deleted || !canSee(c)) return
+        setCusts(prev => prev.find(x => x.id === c.id) ? prev : [...prev, c])
+      })
+      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'customers' }, (payload) => {
+        const c = payload.new
+        if (!c) return
+        if (c.deleted) {
+          setCusts(prev => prev.filter(x => x.id !== c.id))
+        } else {
+          setCusts(prev => {
+            const exists = prev.find(x => x.id === c.id)
+            if (exists) return prev.map(x => x.id === c.id ? c : x)
+            if (canSee(c)) return [...prev, c]
+            return prev
+          })
+        }
+      })
       .subscribe()
     return () => supabase.removeChannel(ch)
-  }, [load, user.id])
+  }, [user])
 
   const filtered = custs.filter(c => {
     const q = sq.toLowerCase()

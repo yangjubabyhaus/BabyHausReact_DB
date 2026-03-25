@@ -104,10 +104,14 @@ function AdminRoot() {
   useEffect(() => {
     const init = async () => {
       await ensureMasters()
-      const saved = getSavedCreds()
-      if (saved.username && saved.password) {
-        const { data } = await supabase.from('users').select('*').eq('username', saved.username).single()
-        if (data && data.pwd === hashPwd(saved.password) && data.approved && data.active) {
+      // localStorage(자동로그인) → sessionStorage(탭 세션) 순서로 확인
+      let creds = getSavedCreds()
+      if (!creds.username) {
+        try { creds = JSON.parse(sessionStorage.getItem('bss_session_creds') || '{}') } catch { creds = {} }
+      }
+      if (creds.username && creds.password) {
+        const { data } = await supabase.from('users').select('*').eq('username', creds.username).single()
+        if (data && data.pwd === hashPwd(creds.password) && data.approved && data.active) {
           setUser(data)
         }
       }
@@ -122,14 +126,21 @@ function AdminRoot() {
     if (data.pwd !== hashPwd(password)) return '아이디 또는 비밀번호가 올바르지 않습니다.'
     if (!data.approved) return '승인 대기 중입니다. 마스터에게 문의해주세요.'
     if (!data.active) return '비활성화된 계정입니다. 마스터에게 문의해주세요.'
-    if (remember) localStorage.setItem('bss_saved_creds', JSON.stringify({ username, password }))
-    else localStorage.removeItem('bss_saved_creds')
+    if (remember) {
+      localStorage.setItem('bss_saved_creds', JSON.stringify({ username, password }))
+      sessionStorage.removeItem('bss_session_creds')
+    } else {
+      localStorage.removeItem('bss_saved_creds')
+      // 자동로그인 미체크여도 탭 세션 동안은 유지
+      sessionStorage.setItem('bss_session_creds', JSON.stringify({ username, password }))
+    }
     setUser(data)
     return null
   }
 
   const logout = () => {
     localStorage.removeItem('bss_saved_creds')
+    sessionStorage.removeItem('bss_session_creds')
     setUser(null)
   }
 
@@ -365,27 +376,29 @@ function AppShell() {
 
   // ── Realtime ──
   useEffect(() => {
+    // customers: 배지 카운트만 갱신 (목록 업데이트는 각 컴포넌트가 payload로 처리)
+    let custTimer = null
     const custCh = supabase.channel(`cust-${user.id}`)
       .on('postgres_changes', { event:'*', schema:'public', table:'customers' }, () => {
-        refreshCounts()
-        setRefreshKey(k => k + 1)
+        clearTimeout(custTimer)
+        custTimer = setTimeout(() => refreshCounts(), 500)
       })
       .subscribe()
 
-    // users 테이블 변경 시: 약간의 지연 후 카운트 + 페이지 전체 갱신
-    // 지연이 있어야 DB에서 삭제/변경이 완전히 반영된 뒤 조회됨
+    // users: 딜레이 후 카운트 + StaffManagement 리마운트
     let userTimer = null
     const userCh = supabase.channel(`user-${user.id}`)
       .on('postgres_changes', { event:'*', schema:'public', table:'users' }, () => {
         clearTimeout(userTimer)
         userTimer = setTimeout(() => {
           refreshCounts()
-          setRefreshKey(k => k + 1)  // StaffManagement 등 하위 페이지도 새로고침
-        }, 600)
+          setRefreshKey(k => k + 1)
+        }, 800)
       })
       .subscribe()
 
     return () => {
+      clearTimeout(custTimer)
       clearTimeout(userTimer)
       supabase.removeChannel(custCh)
       supabase.removeChannel(userCh)

@@ -86,29 +86,28 @@ export default function StaffManagement({ showToast, onRefresh }) {
 
   useEffect(() => { load() }, [load])
 
-  // Realtime: 외부 변경(다른 기기에서의 변경, 새 직원 가입 등)만 반영
+  // Realtime: payload 직접 반영 (재조회 없이 복제 지연 회피)
   // 내가 직접 변경한 경우 skipReload로 무시
-  // DB 반영 시간을 고려해 약간 지연 후 재조회
   useEffect(() => {
-    let reloadTimer = null
     const ch = supabase.channel('staff-changes-' + Date.now())
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'users' },
-        () => {
-          if (skipReload.current) {
-            skipReload.current = false
-            return
-          }
-          clearTimeout(reloadTimer)
-          reloadTimer = setTimeout(() => load(), 400)
-        }
-      )
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:'users' }, (payload) => {
+        if (skipReload.current) { skipReload.current = false; return }
+        const u = payload.new
+        if (u) setUsers(prev => prev.find(x => x.id === u.id) ? prev : [u, ...prev])
+      })
+      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'users' }, (payload) => {
+        if (skipReload.current) { skipReload.current = false; return }
+        const u = payload.new
+        if (u) setUsers(prev => prev.map(x => x.id === u.id ? u : x))
+      })
+      .on('postgres_changes', { event:'DELETE', schema:'public', table:'users' }, (payload) => {
+        if (skipReload.current) { skipReload.current = false; return }
+        const id = payload.old?.id
+        if (id) setUsers(prev => prev.filter(x => x.id !== id))
+      })
       .subscribe()
-    return () => {
-      clearTimeout(reloadTimer)
-      supabase.removeChannel(ch)
-    }
-  }, [load])
+    return () => supabase.removeChannel(ch)
+  }, [])
 
   const pending = users.filter(u => !u.approved && u.active)
   const active  = users.filter(u =>  u.approved && u.active && u.role !== 'master')

@@ -41,11 +41,30 @@ export default function Dashboard({ user, onGoList }) {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
+    const canSee = (c) => can(user.role, 'viewAll') || c.store === user.store
     const ch = supabase.channel(`dash-${user.id}`)
-      .on('postgres_changes', { event:'*', schema:'public', table:'customers' }, load)
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:'customers' }, (payload) => {
+        const c = payload.new
+        if (!c || c.deleted || !canSee(c)) return
+        setCusts(prev => prev.find(x => x.id === c.id) ? prev : [...prev, c])
+      })
+      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'customers' }, (payload) => {
+        const c = payload.new
+        if (!c) return
+        if (c.deleted) {
+          setCusts(prev => prev.filter(x => x.id !== c.id))
+        } else {
+          setCusts(prev => {
+            const exists = prev.find(x => x.id === c.id)
+            if (exists) return prev.map(x => x.id === c.id ? c : x)
+            if (canSee(c)) return [...prev, c]
+            return prev
+          })
+        }
+      })
       .subscribe()
     return () => supabase.removeChannel(ch)
-  }, [load, user.id])
+  }, [user])
 
   // 미발송 + D-day가 min~max 범위에 있는 선물 조회
   const getUpcoming = useCallback((min, max) => {
