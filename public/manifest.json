@@ -1,0 +1,18 @@
+{
+  "name": "BABY HAÜS 관리자",
+  "short_name": "BABY HAÜS",
+  "description": "BABY HAÜS 고객관리 시스템",
+  "start_url": "/admin",
+  "display": "standalone",
+  "background_color": "#2d2a26",
+  "theme_color": "#2d2a26",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
